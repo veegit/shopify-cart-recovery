@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: shopify-cart-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - shopify_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  shopify-webhooks:
+    build: .
+    container_name: shopify-webhook-handler
+    ports:
+      - "8001:8000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - APP_ENV=development
+      - SERVICE_NAME=webhook-handler
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - /app/__pycache__
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - shopify_network
+    restart: unless-stopped
+    command: python main.py webhook-handler
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  web-pixels-handler:
+    build: .
+    container_name: web-pixels-handler
+    ports:
+      - "8002:8000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - APP_ENV=development
+      - SERVICE_NAME=web-pixels-handler
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - /app/__pycache__
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - shopify_network
+    restart: unless-stopped
+    command: python main.py web-pixels-handler
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  event-processor:
+    build: .
+    container_name: event-processor
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - APP_ENV=development
+      - SERVICE_NAME=event-processor
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - /app/__pycache__
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - shopify_network
+    restart: unless-stopped
+    command: python main.py event-processor
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis; r=redis.Redis(host='redis'); r.ping()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis_data:
+
+networks:
+  shopify_network:
+    driver: bridge
