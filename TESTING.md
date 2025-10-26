@@ -1,5 +1,23 @@
 # Local Testing Guide
 
+## ⚙️ Development vs Production Mode
+
+**Development Mode (Default for Local Testing):**
+- Webhook signature validation is **disabled** for easier testing
+- No need to generate valid HMAC signatures
+- Set with `APP_ENV=development` in `.env` file
+- **⚠️ NEVER use in production!**
+
+**Production Mode:**
+- Webhook signature validation is **enabled** and strictly enforced
+- Requires valid HMAC-SHA256 signatures from Shopify
+- Set with `APP_ENV=production` in `.env` file
+- Use `generate_webhook_signature.py` to create test requests
+
+The project is configured for **development mode** by default, making local testing simple and straightforward.
+
+---
+
 ## Quick Start
 
 ### 1. Start All Services with Docker
@@ -56,11 +74,15 @@ curl http://localhost:8102/health
 
 ### Test 2: Send a Webhook Event
 
+**Development Mode (No Signature Required):**
+
+When `APP_ENV=development` in your `.env` file, signature validation is disabled for easier testing:
+
 ```bash
 curl -X POST http://localhost:8101/webhooks/carts/create \
   -H "Content-Type: application/json" \
   -H "X-Shopify-Topic: carts/create" \
-  -H "X-Shopify-Hmac-Sha256: test_signature" \
+  -H "X-Shopify-Hmac-Sha256: dev_mode_signature_not_validated" \
   -H "X-Shopify-Shop-Domain: test-shop.myshopify.com" \
   -d '{
     "id": 123456,
@@ -76,6 +98,23 @@ curl -X POST http://localhost:8101/webhooks/carts/create \
     "created_at": "2025-10-26T10:00:00Z",
     "updated_at": "2025-10-26T10:00:00Z"
   }'
+```
+
+**Expected Response (Development Mode):**
+```json
+{
+  "status": "success",
+  "event_id": "uuid-here"
+}
+```
+
+**Production Mode (Valid Signature Required):**
+
+For production testing with signature validation, use the signature generator:
+
+```bash
+# Generate a valid signed request
+python3 generate_webhook_signature.py your_webhook_secret
 ```
 
 ### Test 3: Send a Web Pixels Click Event

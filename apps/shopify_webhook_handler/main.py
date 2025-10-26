@@ -126,31 +126,43 @@ async def validate_webhook_request(
 ):
     if not x_shopify_shop_domain:
         raise HTTPException(status_code=400, detail="Missing shop domain header")
-    
+
     if not x_shopify_topic:
         raise HTTPException(status_code=400, detail="Missing webhook topic header")
-    
+
     if not rate_limiter.is_allowed(x_shopify_shop_domain):
         raise HTTPException(status_code=429, detail="Rate limit exceeded for shop")
-    
+
     payload = await request.body()
-    
+
     if len(payload) > MAX_PAYLOAD_SIZE:
         raise HTTPException(status_code=413, detail="Payload too large")
-    
-    if not verify_webhook_signature(payload, x_shopify_hmac_sha256, settings.shopify.webhook_secret):
-        logger.warning(f"Invalid HMAC signature from {x_shopify_shop_domain}")
-        raise HTTPException(status_code=401, detail="Invalid webhook signature")
-    
-    if not verify_timestamp(x_shopify_timestamp):
-        logger.warning(f"Invalid timestamp from {x_shopify_shop_domain}")
-        raise HTTPException(status_code=401, detail="Invalid or expired timestamp")
-    
+
+    # Skip signature validation in development mode for easier testing
+    is_development = settings.app.env.lower() == "development"
+
+    if not is_development:
+        # Production mode: strict validation required
+        if not verify_webhook_signature(payload, x_shopify_hmac_sha256, settings.shopify.webhook_secret):
+            logger.warning(f"Invalid HMAC signature from {x_shopify_shop_domain}")
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+        if not verify_timestamp(x_shopify_timestamp):
+            logger.warning(f"Invalid timestamp from {x_shopify_shop_domain}")
+            raise HTTPException(status_code=401, detail="Invalid or expired timestamp")
+    else:
+        # Development mode: log warning but allow request
+        logger.info("Development mode: Skipping webhook signature validation")
+        if x_shopify_hmac_sha256 and settings.shopify.webhook_secret != "your_webhook_secret":
+            # Still verify if signature is provided and secret is configured
+            if not verify_webhook_signature(payload, x_shopify_hmac_sha256, settings.shopify.webhook_secret):
+                logger.warning(f"HMAC signature check failed (allowed in dev mode)")
+
     try:
         payload_data = json.loads(payload.decode('utf-8'))
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
-    
+
     return {
         "payload": payload_data,
         "shop_domain": x_shopify_shop_domain,
@@ -284,11 +296,14 @@ async def handle_order_fulfilled(webhook_data: Dict[str, Any] = Depends(validate
 @app.get("/health")
 async def health_check():
     redis_healthy = await redis_client.health_check() if redis_client else False
-    
+    is_development = settings.app.env.lower() == "development"
+
     return {
         "status": "healthy" if redis_healthy else "unhealthy",
         "redis_connection": redis_healthy,
         "webhook_secret_configured": bool(settings.shopify.webhook_secret),
+        "environment": settings.app.env,
+        "signature_validation": "disabled" if is_development else "enabled",
         "timestamp": datetime.utcnow().isoformat()
     }
 
