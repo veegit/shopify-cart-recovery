@@ -140,18 +140,24 @@ class RedisClient:
 
 
 _redis_client = None
+_redis_client_lock = asyncio.Lock()
 
 
 async def get_redis_client() -> RedisClient:
     global _redis_client
     if _redis_client is None:
-        _redis_client = RedisClient()
-        await _redis_client.connect()
+        async with _redis_client_lock:
+            # Double-check pattern to prevent race condition
+            if _redis_client is None:
+                _redis_client = RedisClient()
+                await _redis_client.connect()
     return _redis_client
 
 
 async def close_redis_client():
     global _redis_client
     if _redis_client:
-        await _redis_client.disconnect()
-        _redis_client = None
+        async with _redis_client_lock:
+            if _redis_client:
+                await _redis_client.disconnect()
+                _redis_client = None

@@ -34,22 +34,46 @@ class WebhookRateLimiter:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.requests = {}
-    
+        self.last_cleanup = time.time()
+        self.cleanup_interval = 300  # Cleanup every 5 minutes
+
+    def cleanup_inactive_domains(self):
+        """Remove shop domains that have no recent requests"""
+        now = time.time()
+        if now - self.last_cleanup < self.cleanup_interval:
+            return
+
+        window_start = now - self.window_seconds
+        inactive_domains = [
+            domain for domain, requests in self.requests.items()
+            if not requests or all(req_time <= window_start for req_time in requests)
+        ]
+
+        for domain in inactive_domains:
+            del self.requests[domain]
+
+        self.last_cleanup = now
+        if inactive_domains:
+            logger.info(f"Cleaned up {len(inactive_domains)} inactive shop domains from rate limiter")
+
     def is_allowed(self, shop_domain: str) -> bool:
         now = time.time()
         window_start = now - self.window_seconds
-        
+
+        # Periodic cleanup to prevent memory leak
+        self.cleanup_inactive_domains()
+
         if shop_domain not in self.requests:
             self.requests[shop_domain] = []
-        
+
         self.requests[shop_domain] = [
-            req_time for req_time in self.requests[shop_domain] 
+            req_time for req_time in self.requests[shop_domain]
             if req_time > window_start
         ]
-        
+
         if len(self.requests[shop_domain]) >= self.max_requests:
             return False
-        
+
         self.requests[shop_domain].append(now)
         return True
 
@@ -137,12 +161,16 @@ async def validate_webhook_request(
 
 async def process_webhook(webhook_data: Dict[str, Any]):
     try:
+        if not redis_client:
+            logger.error("Redis client not initialized")
+            raise HTTPException(status_code=503, detail="Service unavailable - Redis not connected")
+
         redis_event = event_processor.process_webhook(
             webhook_data["topic"],
             webhook_data["payload"],
             webhook_data["shop_domain"]
         )
-        
+
         channel_map = {
             "carts/create": "cart_events",
             "carts/update": "cart_events",
@@ -154,7 +182,7 @@ async def process_webhook(webhook_data: Dict[str, Any]):
             "orders/paid": "order_events",
             "orders/fulfilled": "order_events"
         }
-        
+
         channel = channel_map.get(webhook_data["topic"], "webhook_events")
         success = await redis_client.publish_event(channel, redis_event)
         

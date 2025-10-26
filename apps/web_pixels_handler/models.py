@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, Dict, Any
 from uuid import uuid4
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class BaseWebPixelEvent(BaseModel):
@@ -46,13 +46,15 @@ class ClickedEventModel(BaseWebPixelEvent):
     page_x: Optional[int] = None
     page_y: Optional[int] = None
     
-    @validator('clientX', 'clientY')
+    @field_validator('clientX', 'clientY')
+    @classmethod
     def validate_coordinates(cls, v):
         if v < 0 or v > 10000:
             raise ValueError('Invalid coordinate value')
         return v
-    
-    @validator('element_tag')
+
+    @field_validator('element_tag')
+    @classmethod
     def validate_tag(cls, v):
         valid_tags = ['a', 'button', 'input', 'div', 'span', 'img', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'td', 'th']
         if v.lower() not in valid_tags:
@@ -69,7 +71,8 @@ class InputChangedEventModel(BaseWebPixelEvent):
     element_selector: Optional[str] = None
     form_id: Optional[str] = None
     
-    @validator('element_type')
+    @field_validator('element_type')
+    @classmethod
     def validate_input_type(cls, v):
         valid_types = ['text', 'email', 'password', 'number', 'tel', 'url', 'search', 'textarea', 'select']
         if v.lower() not in valid_types:
@@ -106,15 +109,16 @@ class FormSubmittedEventModel(BaseWebPixelEvent):
     form_selector: Optional[str] = None
     submission_method: str = Field(default="click")
     
-    @validator('form_method')
+    @field_validator('form_method')
+    @classmethod
     def validate_method(cls, v):
         return v.upper() if v else "POST"
-    
-    @validator('filled_fields', 'field_count')
-    def validate_field_counts(cls, v, values):
-        if 'field_count' in values and v > values['field_count']:
+
+    @model_validator(mode='after')
+    def validate_field_counts(self):
+        if self.filled_fields > self.field_count:
             raise ValueError('Filled fields cannot exceed total field count')
-        return v
+        return self
 
 
 class PageViewedEventModel(BaseWebPixelEvent):
@@ -131,8 +135,9 @@ class PageViewedEventModel(BaseWebPixelEvent):
 
 class WebPixelEventProcessor:
     def __init__(self):
-        self.session_cache = {}
-    
+        self.session_cache = {}  # For session metadata
+        self.deduplication_cache = {}  # Separate cache for event deduplication
+
     def validate_payload(self, event_type: str, payload: Dict[str, Any]) -> BaseWebPixelEvent:
         model_map = {
             "clicked": ClickedEventModel,
@@ -142,13 +147,13 @@ class WebPixelEventProcessor:
             "form_submitted": FormSubmittedEventModel,
             "page_viewed": PageViewedEventModel
         }
-        
+
         model_class = model_map.get(event_type)
         if not model_class:
             raise ValueError(f"Unknown event type: {event_type}")
-        
+
         return model_class(**payload)
-    
+
     def enrich_event(self, event: BaseWebPixelEvent, session_context: Optional[Dict[str, Any]] = None) -> BaseWebPixelEvent:
         if session_context:
             if not event.session_id and session_context.get("session_id"):
@@ -157,31 +162,31 @@ class WebPixelEventProcessor:
                 event.customer_id = session_context["customer_id"]
             if not event.shop_domain and session_context.get("shop_domain"):
                 event.shop_domain = session_context["shop_domain"]
-        
+
         if event.session_id and event.session_id not in self.session_cache:
             self.session_cache[event.session_id] = {
                 "first_seen": event.timestamp,
                 "last_seen": event.timestamp,
                 "event_count": 0
             }
-        
-        if event.session_id:
+
+        if event.session_id and event.session_id in self.session_cache:
             session_data = self.session_cache[event.session_id]
             session_data["last_seen"] = event.timestamp
             session_data["event_count"] += 1
             event.sequence_number = session_data["event_count"]
-        
+
         return event
-    
+
     def deduplicate_event(self, event: BaseWebPixelEvent) -> bool:
         if not event.session_id:
             return True
-        
+
         cache_key = f"{event.session_id}:{event.event_id}"
-        if cache_key in self.session_cache:
+        if cache_key in self.deduplication_cache:
             return False
-        
-        self.session_cache[cache_key] = True
+
+        self.deduplication_cache[cache_key] = True
         return True
     
     def process_event(self, event_type: str, payload: Dict[str, Any], session_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

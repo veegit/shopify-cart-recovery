@@ -1,29 +1,28 @@
 import os
 from typing import Optional
-from pydantic import validator
-from pydantic_settings import BaseSettings
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class RedisConfig(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="REDIS_")
+
     host: str = "localhost"
     port: int = 6379
     db: int = 0
     password: Optional[str] = None
-    
-    class Config:
-        env_prefix = "REDIS_"
 
 
 class ShopifyConfig(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="SHOPIFY_")
+
     api_key: str
     api_secret: str
     webhook_secret: str
     app_url: str
-    
-    class Config:
-        env_prefix = "SHOPIFY_"
-    
-    @validator('api_key', 'api_secret', 'webhook_secret', 'app_url')
+
+    @field_validator('api_key', 'api_secret', 'webhook_secret', 'app_url')
+    @classmethod
     def validate_required_fields(cls, v):
         if not v:
             raise ValueError('This field is required')
@@ -31,29 +30,27 @@ class ShopifyConfig(BaseSettings):
 
 
 class AppConfig(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="APP_")
+
     env: str = "development"
     port: int = 8000
     host: str = "0.0.0.0"
-    
-    class Config:
-        env_prefix = "APP_"
 
 
 class LoggingConfig(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="LOG_")
+
     level: str = "INFO"
     format: str = "json"
-    
-    class Config:
-        env_prefix = "LOG_"
 
 
 class WebPixelsConfig(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="WEB_PIXELS_")
+
     endpoint: str
-    
-    class Config:
-        env_prefix = "WEB_PIXELS_"
-    
-    @validator('endpoint')
+
+    @field_validator('endpoint')
+    @classmethod
     def validate_endpoint(cls, v):
         if not v:
             raise ValueError('Web Pixels endpoint is required')
@@ -67,11 +64,11 @@ class Settings:
         self.app = AppConfig()
         self.logging = LoggingConfig()
         self.web_pixels = WebPixelsConfig()
-    
+
     def validate_all(self):
         try:
-            self.shopify.dict()
-            self.web_pixels.dict()
+            self.shopify.model_dump()
+            self.web_pixels.model_dump()
             return True
         except Exception as e:
             raise ValueError(f"Configuration validation failed: {e}")

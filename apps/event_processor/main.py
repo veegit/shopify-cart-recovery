@@ -74,13 +74,25 @@ class SessionJourney:
             "hesitation_pattern": False,
             "exit_intent": False
         }
-        
+
         if len(self.click_pattern) > 10:
-            click_times = [datetime.fromisoformat(c["timestamp"]) for c in self.click_pattern[-10:]]
-            if len(click_times) > 1:
-                time_diffs = [(click_times[i] - click_times[i-1]).total_seconds() for i in range(1, len(click_times))]
-                avg_time_between_clicks = sum(time_diffs) / len(time_diffs)
-                signals["rapid_clicks"] = avg_time_between_clicks < 2.0
+            try:
+                click_times = []
+                for c in self.click_pattern[-10:]:
+                    if "timestamp" in c:
+                        try:
+                            click_times.append(datetime.fromisoformat(c["timestamp"]))
+                        except (ValueError, TypeError):
+                            # Skip malformed timestamps
+                            continue
+
+                if len(click_times) > 1:
+                    time_diffs = [(click_times[i] - click_times[i-1]).total_seconds() for i in range(1, len(click_times))]
+                    avg_time_between_clicks = sum(time_diffs) / len(time_diffs)
+                    signals["rapid_clicks"] = avg_time_between_clicks < 2.0
+            except Exception:
+                # Silently skip if timestamp parsing fails
+                pass
         
         form_events = [e for e in self.form_interactions if e["event_type"] in ["input_focused", "input_changed"]]
         form_submissions = [e for e in self.form_interactions if e["event_type"] == "form_submitted"]
@@ -101,9 +113,18 @@ class BehaviorAnalyzer:
     def analyze_click_pattern(self, session_id: str, click_events: List[Dict[str, Any]]) -> Dict[str, Any]:
         if len(click_events) < 2:
             return {"pattern_type": "insufficient_data"}
-        
-        coordinates = [(e["data"]["clientX"], e["data"]["clientY"]) for e in click_events if "data" in e]
-        
+
+        coordinates = []
+        for e in click_events:
+            if "data" in e and isinstance(e["data"], dict):
+                data = e["data"]
+                if "clientX" in data and "clientY" in data:
+                    try:
+                        coordinates.append((int(data["clientX"]), int(data["clientY"])))
+                    except (ValueError, TypeError):
+                        # Skip invalid coordinates
+                        continue
+
         if len(coordinates) < 2:
             return {"pattern_type": "no_coordinates"}
         

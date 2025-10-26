@@ -1,9 +1,9 @@
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import Optional, Dict, Any, List
 from uuid import uuid4
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class EventType(str, Enum):
@@ -51,11 +51,12 @@ class LineItem(BaseModel):
     price: str
     sku: Optional[str] = None
     
-    @validator('price')
+    @field_validator('price')
+    @classmethod
     def validate_price(cls, v):
         try:
             return str(Decimal(v))
-        except:
+        except (ValueError, InvalidOperation, TypeError):
             raise ValueError('Invalid price format')
 
 
@@ -70,15 +71,17 @@ class CartEventModel(BaseEventModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     
-    @validator('currency')
+    @field_validator('currency')
+    @classmethod
     def validate_currency(cls, v):
         return v.upper()
-    
-    @validator('total_price')
+
+    @field_validator('total_price')
+    @classmethod
     def validate_total_price(cls, v):
         try:
             return str(Decimal(v))
-        except:
+        except (ValueError, InvalidOperation, TypeError):
             raise ValueError('Invalid total price format')
 
 
@@ -98,11 +101,13 @@ class CheckoutEventModel(BaseEventModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     
-    @validator('currency')
+    @field_validator('currency')
+    @classmethod
     def validate_currency(cls, v):
         return v.upper()
-    
-    @validator('email')
+
+    @field_validator('email')
+    @classmethod
     def validate_email(cls, v):
         if v and '@' not in v:
             raise ValueError('Invalid email format')
@@ -122,17 +127,19 @@ class CustomerEventModel(BaseEventModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     
-    @validator('email')
+    @field_validator('email')
+    @classmethod
     def validate_email(cls, v):
         if v and '@' not in v:
             raise ValueError('Invalid email format')
         return v
-    
-    @validator('total_spent')
+
+    @field_validator('total_spent')
+    @classmethod
     def validate_total_spent(cls, v):
         try:
             return str(Decimal(v))
-        except:
+        except (ValueError, InvalidOperation, TypeError):
             raise ValueError('Invalid total spent format')
 
 
@@ -154,23 +161,26 @@ class OrderEventModel(BaseEventModel):
     processed_at: Optional[datetime] = None
     cancelled_at: Optional[datetime] = None
     
-    @validator('currency')
+    @field_validator('currency')
+    @classmethod
     def validate_currency(cls, v):
         return v.upper()
-    
-    @validator('total_price', 'subtotal_price')
+
+    @field_validator('total_price', 'subtotal_price')
+    @classmethod
     def validate_price_fields(cls, v):
         try:
             return str(Decimal(v))
-        except:
+        except (ValueError, InvalidOperation, TypeError):
             raise ValueError('Invalid price format')
-    
-    @validator('financial_status')
+
+    @field_validator('financial_status')
+    @classmethod
     def validate_financial_status(cls, v):
         if v:
             valid_statuses = ['pending', 'authorized', 'partially_paid', 'paid', 'partially_refunded', 'refunded', 'voided']
             if v.lower() not in valid_statuses:
-                return v
+                raise ValueError(f'Invalid financial status: {v}. Must be one of {valid_statuses}')
             return v.lower()
         return v
 
