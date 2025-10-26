@@ -25,7 +25,8 @@
             this.scrollDepth = 0;
             this.lastMouseEvent = 0;
             this.retryQueue = [];
-            
+            this.batchIntervalId = null; // Store interval ID for cleanup
+
             this.init();
         }
         
@@ -217,9 +218,12 @@
                     url: window.location.href
                 });
             };
-            
-            window.addEventListener('beforeunload', trackPageView);
-            
+
+            window.addEventListener('beforeunload', () => {
+                trackPageView();
+                this.cleanup();  // Clean up intervals on page unload
+            });
+
             // Track page view on visibility change (tab switching)
             document.addEventListener('visibilitychange', () => {
                 if (document.hidden) {
@@ -322,11 +326,28 @@
         }
         
         setupBatchProcessor() {
-            setInterval(() => {
+            // Clear any existing interval
+            if (this.batchIntervalId) {
+                clearInterval(this.batchIntervalId);
+            }
+
+            this.batchIntervalId = setInterval(() => {
                 if (this.eventQueue.length > 0) {
                     this.processBatch();
                 }
             }, CONFIG.BATCH_TIMEOUT);
+        }
+
+        cleanup() {
+            // Clear batch processor interval
+            if (this.batchIntervalId) {
+                clearInterval(this.batchIntervalId);
+                this.batchIntervalId = null;
+            }
+
+            // Clear event queues
+            this.eventQueue = [];
+            this.retryQueue = [];
         }
         
         async processBatch() {
@@ -382,12 +403,12 @@
                 
             } catch (error) {
                 console.warn(`Web Pixels: Failed to send ${eventType} event (attempt ${attempt}):`, error.message);
-                
-                if (attempt < CONFIG.RETRY_ATTEMPTS && !error.name === 'AbortError') {
+
+                if (attempt < CONFIG.RETRY_ATTEMPTS && error.name !== 'AbortError') {
                     await this.delay(CONFIG.RETRY_DELAY * attempt);
                     return this.sendEvent(eventType, eventData, attempt + 1);
                 }
-                
+
                 throw error;
             }
         }

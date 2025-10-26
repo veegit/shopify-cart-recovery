@@ -52,26 +52,50 @@ class ServiceManager:
         from apps.event_processor.main import main as processor_main
         await processor_main()
     
+    async def start_webhook_handler_on_port(self, port: int):
+        """Start webhook handler on specified port"""
+        logger.info(f"Starting Shopify Webhook Handler on port {port}")
+        import uvicorn
+        from apps.shopify_webhook_handler.main import app
+
+        config = uvicorn.Config(
+            app,
+            host=self.settings.app.host,
+            port=port,
+            log_config=None  # Use our custom logging
+        )
+        server = uvicorn.Server(config)
+        await server.serve()
+
+    async def start_web_pixels_handler_on_port(self, port: int):
+        """Start web pixels handler on specified port"""
+        logger.info(f"Starting Web Pixels Handler on port {port}")
+        import uvicorn
+        from apps.web_pixels_handler.main import app
+
+        config = uvicorn.Config(
+            app,
+            host=self.settings.app.host,
+            port=port,
+            log_config=None  # Use our custom logging
+        )
+        server = uvicorn.Server(config)
+        await server.serve()
+
     async def start_all_services(self):
         logger.info("Starting all services")
-        
+
         # Start event processor in background
         processor_task = asyncio.create_task(self.start_event_processor())
-        
+
         # Start webhook handler on port 8001
-        webhook_settings = self.settings
-        webhook_settings.app.port = 8001
-        
-        webhook_task = asyncio.create_task(self.start_webhook_handler())
-        
-        # Start web pixels handler on port 8002  
-        pixels_settings = self.settings
-        pixels_settings.app.port = 8002
-        
-        pixels_task = asyncio.create_task(self.start_web_pixels_handler())
-        
+        webhook_task = asyncio.create_task(self.start_webhook_handler_on_port(8001))
+
+        # Start web pixels handler on port 8002
+        pixels_task = asyncio.create_task(self.start_web_pixels_handler_on_port(8002))
+
         self.running_services = [processor_task, webhook_task, pixels_task]
-        
+
         try:
             await asyncio.gather(*self.running_services)
         except asyncio.CancelledError:

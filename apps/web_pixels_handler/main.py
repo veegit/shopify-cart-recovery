@@ -51,22 +51,46 @@ class RateLimiter:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.requests = {}
-    
+        self.last_cleanup = time.time()
+        self.cleanup_interval = 300  # Cleanup every 5 minutes
+
+    def cleanup_inactive_clients(self):
+        """Remove client IDs that have no recent requests"""
+        now = time.time()
+        if now - self.last_cleanup < self.cleanup_interval:
+            return
+
+        window_start = now - self.window_seconds
+        inactive_clients = [
+            client_id for client_id, requests in self.requests.items()
+            if not requests or all(req_time <= window_start for req_time in requests)
+        ]
+
+        for client_id in inactive_clients:
+            del self.requests[client_id]
+
+        self.last_cleanup = now
+        if inactive_clients:
+            logger.info(f"Cleaned up {len(inactive_clients)} inactive clients from rate limiter")
+
     def is_allowed(self, client_id: str) -> bool:
         now = time.time()
         window_start = now - self.window_seconds
-        
+
+        # Periodic cleanup to prevent memory leak
+        self.cleanup_inactive_clients()
+
         if client_id not in self.requests:
             self.requests[client_id] = []
-        
+
         self.requests[client_id] = [
-            req_time for req_time in self.requests[client_id] 
+            req_time for req_time in self.requests[client_id]
             if req_time > window_start
         ]
-        
+
         if len(self.requests[client_id]) >= self.max_requests:
             return False
-        
+
         self.requests[client_id].append(now)
         return True
 
@@ -148,10 +172,14 @@ async def process_web_pixel_event(
 ):
     start_time = time.time()
     client_id = get_client_id(request)
-    
+
     if not rate_limiter.is_allowed(client_id):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
-    
+
+    if not redis_client:
+        logger.error("Redis client not initialized")
+        raise HTTPException(status_code=503, detail="Service unavailable - Redis not connected")
+
     try:
         session_context = get_or_create_session(request, customer_id)
         redis_event = event_processor.process_event(event_type, payload, session_context)
